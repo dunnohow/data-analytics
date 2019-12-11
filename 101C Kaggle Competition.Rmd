@@ -1,0 +1,547 @@
+---
+title: "101C Final"
+author: "Park"
+date: "11/24/2019"
+output: pdf_document
+---
+######################################
+#Combine test and train dataset
+######################################
+```{r}
+library(dplyr)
+train.full = read.csv("train.csv")
+test.full = read.csv("test.csv")
+test.full = test.full %>% mutate(HTWins = NA)
+
+######################################
+#Row bind train and test dataset
+#Drop ID and game ID which we don't need
+mix <- rbind(train.full, test.full)
+mix <- mix %>% subset(select = -c(id, gameID)) %>% mutate(date = as.Date(as.character(date), "%Y%m%d"))
+
+######################################
+#Check the timeline of train and test data
+mix %>% filter(!is.na(HTWins)) %>%
+  select(date) %>% tail(10)
+mix %>% filter(is.na(HTWins)) %>%
+  select(date) %>% head(10)
+```
+
+######################################
+#Delete all the deplicated variable
+#Going to delete VT variables not the HT ones
+######################################
+```{r}
+mix <- mix %>% subset(select = -c(VT.TS.fgm, VT.TS.fga, VT.TS.tpm, VT.TS.tpa, VT.TS.fta, VT.TS.oreb, VT.TS.dreb, VT.TS.ast,
+                                  VT.TS.stl,VT.TS.blk,VT.TS.to,VT.TS.pf,VT.TS.pts, VT.TA.fga, VT.TA.tpm,VT.TA.tpa,VT.TA.fta, 
+                                  VT.TA.oreb, VT.TA.dreb, VT.TA.ast, VT.TA.stl,VT.TA.to, VT.TA.pf, VT.TA.pts,VT.OTS.fgm, 
+                                  VT.OTS.fga, VT.OTS.tpm, VT.OTS.tpa, VT.OTS.fta, VT.OTS.oreb, VT.OTS.dreb, VT.OTS.stl, 
+                                  VT.OTS.blk, VT.OTS.pf, VT.OTS.pts,VT.OTA.fgm, VT.OTA.fga, VT.OTA.tpa, VT.OTA.fta,
+                                  VT.OTA.fta, VT.OTA.blk, VT.OTA.to, VT.OTA.pts, VT.S1.plmin , VT.S3.plmin, VT.S4.plmin, VT.S5.plmin,
+                                  VT.OS1.plmin, VT.OS2.plmin, VT.OS3.plmin, VT.OTS.fgm, VT.OTS.fga, VT.OTS.tpm, VT.OTS.tpa,
+                                  VT.OTS.fta, VT.OTS.oreb, VT.OTS.dreb, VT.OTS.stl, VT.OTS.blk, VT.OTS.pf, VT.OTS.pts, VT.OTA.fgm,
+                                  VT.OTA.fga, VT.OTA.tpa, VT.OTA.fta, VT.OTA.ast, VT.OTA.blk, VT.OTA.to, VT.OTA.pts, VT.TS.fgm,
+                                  VT.TS.fga, VT.TS.tpm, VT.TS.tpa, VT.TS.fta, VT.TS.oreb, VT.TS.dreb, VT.TS.ast, VT.TS.stl,
+                                  VT.TS.blk, VT.TS.to, VT.TS.pf, VT.TS.pts, VT.TA.fga, VT.TA.tpm, VT.TA.tpa, VT.TA.fta, VT.TA.oreb,
+                                  VT.TA.dreb, VT.TA.ast, VT.TA.stl, VT.TA.to, VT.TA.pf, VT.TA.pts, VT.OS1.plmin, VT.OS2.plmin,
+                                  VT.OS3.plmin, VT.S1.plmin, VT.S3.plmin, VT.S4.plmin, VT.S5.plmin))
+```
+
+######################################
+#Make new variables - Zscores
+######################################
+
+```{r}
+######################################
+#Normalize the ability of each player and sum up the zcores of whole players 
+
+#HT.S.plmin by team
+mix %>% filter(!is.na(HTWins)) %>% select(HTWins, contains("plm")) %>%
+  group_by(HTWins) %>% summarise(mean = mean(HT.S1.plmin))
+
+#function for applying function
+express.func <- function(pattern, func){
+  return(
+    apply(mix[,grepl(pattern, colnames(mix)),drop=F], 1, func)
+  )
+}
+
+######################################
+#Sum of S.plmin
+mix <- mix %>% 
+  mutate(VT.S.plmin.sum = express.func("^VT.S[0-9].plmin*",sum),
+         HT.S.plmin.sum = express.func("^HT.S[0-9].plmin*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.S.sum = mean(VT.S.plmin.sum),
+                                 mean.HT.S.sum = mean(HT.S.plmin.sum))
+
+#HT.S.plmin by each team
+HT.S.plmin <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.S.plmin.sum = mean(HT.S.plmin.sum),
+                             sd.HT.S.plmin.sum = sd(HT.S.plmin.sum))
+
+#VT.S.plmin by each team
+VT.S.plmin <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.S.plmin.sum = mean(VT.S.plmin.sum),
+                             sd.VT.S.plmin.sum = sd(VT.S.plmin.sum))
+
+#Zscore for HT.S.plmin
+mix <- mix %>% left_join(HT.S.plmin, by="HT") %>% 
+  mutate(HT.Team.plmin.zscore = (HT.S.plmin.sum-mean.HT.S.plmin.sum)/sd.HT.S.plmin.sum) %>%
+  select(subset = -c(mean.HT.S.plmin.sum, sd.HT.S.plmin.sum))
+
+#Zscore for VT.S.plmin
+mix <- mix %>% left_join(VT.S.plmin, by="VT") %>% 
+  mutate(VT.Team.plmin.zscore = (VT.S.plmin.sum-mean.VT.S.plmin.sum)/sd.VT.S.plmin.sum) %>%
+  select(subset = -c(mean.VT.S.plmin.sum, sd.VT.S.plmin.sum))
+
+rm(HT.S.plmin,VT.S.plmin)
+
+######################################
+#Sum of S.pts
+mix <- mix %>% 
+  mutate(VT.S.pts.sum = express.func("^VT.S[0-9].pts*",sum),
+         HT.S.pts.sum = express.func("^HT.S[0-9].pts*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.S.sum = mean(VT.S.pts.sum),
+                                 mean.HT.S.sum = mean(HT.S.pts.sum))
+
+#HT.S.pts by each team
+HT.S.pts <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.S.pts.sum = mean(HT.S.pts.sum),
+                             sd.HT.S.pts.sum = sd(HT.S.pts.sum))
+
+#VT.S.pts by each team
+VT.S.pts <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.S.pts.sum = mean(VT.S.pts.sum),
+                             sd.VT.S.pts.sum = sd(VT.S.pts.sum))
+
+#Zscore for HT.S.pts
+mix <- mix %>% left_join(HT.S.pts, by="HT") %>% 
+  mutate(HT.Team.pts.zscore = (HT.S.pts.sum-mean.HT.S.pts.sum)/sd.HT.S.pts.sum) %>%
+  select(subset = -c(mean.HT.S.pts.sum, sd.HT.S.pts.sum))
+
+#Zscore for VT.S.pts
+mix <- mix %>% left_join(VT.S.pts, by="VT") %>% 
+  mutate(VT.Team.pts.zscore = (VT.S.pts.sum-mean.VT.S.pts.sum)/sd.VT.S.pts.sum) %>%
+  select(subset = -c(mean.VT.S.pts.sum, sd.VT.S.pts.sum))
+
+rm(HT.S.pts,VT.S.pts)
+
+######################################
+#Sum of S.min
+mix <- mix %>% 
+  mutate(VT.S.min.sum = express.func("^VT.S[0-9].min*",sum),
+         HT.S.min.sum = express.func("^HT.S[0-9].min*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.S.sum = mean(VT.S.min.sum),
+                                 mean.HT.S.sum = mean(HT.S.min.sum))
+
+#HT.S.min by each team
+HT.S.min <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.S.min.sum = mean(HT.S.min.sum),
+                             sd.HT.S.min.sum = sd(HT.S.min.sum))
+
+#VT.S.pts by each team
+VT.S.min <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.S.min.sum = mean(VT.S.min.sum),
+                             sd.VT.S.min.sum = sd(VT.S.min.sum))
+
+#Zscore for HT.S.min
+mix <- mix %>% left_join(HT.S.min, by="HT") %>% 
+  mutate(HT.Team.min.zscore = (HT.S.min.sum-mean.HT.S.min.sum)/sd.HT.S.min.sum) %>%
+  select(subset = -c(mean.HT.S.min.sum, sd.HT.S.min.sum))
+
+#Zscore for VT.S.min
+mix <- mix %>% left_join(VT.S.min, by="VT") %>% 
+  mutate(VT.Team.min.zscore = (VT.S.min.sum-mean.VT.S.min.sum)/sd.VT.S.min.sum) %>%
+  select(subset = -c(mean.VT.S.min.sum, sd.VT.S.min.sum))
+
+rm(HT.S.min,VT.S.min)
+
+######################################
+#Sum of S.stl
+mix <- mix %>% 
+  mutate(VT.S.stl.sum = express.func("^VT.S[0-9].stl*",sum),
+         HT.S.stl.sum = express.func("^HT.S[0-9].stl*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.S.sum = mean(VT.S.stl.sum),
+                                 mean.HT.S.sum = mean(HT.S.stl.sum))
+
+#HT.S.stl by each team
+HT.S.stl <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.S.stl.sum = mean(HT.S.stl.sum),
+                             sd.HT.S.stl.sum = sd(HT.S.stl.sum))
+
+#VT.S.stl by each team
+VT.S.stl <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.S.stl.sum = mean(VT.S.stl.sum),
+                             sd.VT.S.stl.sum = sd(VT.S.stl.sum))
+
+#Zscore for HT.S.stl
+mix <- mix %>% left_join(HT.S.stl, by="HT") %>% 
+  mutate(HT.Team.stl.zscore = (HT.S.stl.sum-mean.HT.S.stl.sum)/sd.HT.S.stl.sum) %>%
+  select(subset = -c(mean.HT.S.stl.sum, sd.HT.S.stl.sum))
+
+#Zscore for VT.S.stl
+mix <- mix %>% left_join(VT.S.stl, by="VT") %>% 
+  mutate(VT.Team.stl.zscore = (VT.S.stl.sum-mean.VT.S.stl.sum)/sd.VT.S.stl.sum) %>%
+  select(subset = -c(mean.VT.S.stl.sum, sd.VT.S.stl.sum))
+
+rm(HT.S.stl,VT.S.stl)
+
+######################################
+#Sum of S.ast
+mix <- mix %>% 
+  mutate(VT.S.ast.sum = express.func("^VT.S[0-9].ast*",sum),
+         HT.S.ast.sum = express.func("^HT.S[0-9].ast*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.S.sum = mean(VT.S.ast.sum),
+                                 mean.HT.S.sum = mean(HT.S.ast.sum))
+
+#HT.S.ast by each team
+HT.S.ast <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.S.ast.sum = mean(HT.S.ast.sum),
+                             sd.HT.S.ast.sum = sd(HT.S.ast.sum))
+
+#VT.S.ast by each team
+VT.S.ast <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.S.ast.sum = mean(VT.S.ast.sum),
+                             sd.VT.S.ast.sum = sd(VT.S.ast.sum))
+
+#Zscore for HT.S.ast
+mix <- mix %>% left_join(HT.S.ast, by="HT") %>% 
+  mutate(HT.Team.ast.zscore = (HT.S.ast.sum-mean.HT.S.ast.sum)/sd.HT.S.ast.sum) %>%
+  select(subset = -c(mean.HT.S.ast.sum, sd.HT.S.ast.sum))
+
+#Zscore for VT.S.ast
+mix <- mix %>% left_join(VT.S.ast, by="VT") %>% 
+  mutate(VT.Team.ast.zscore = (VT.S.ast.sum-mean.VT.S.ast.sum)/sd.VT.S.ast.sum) %>%
+  select(subset = -c(mean.VT.S.ast.sum, sd.VT.S.ast.sum))
+
+rm(HT.S.ast,VT.S.ast)
+
+######################################
+#Sum of OS.dreb
+mix <- mix %>% 
+  mutate(VT.OS.dreb.sum = express.func("^VT.OS[0-9].dreb*",sum),
+         HT.OS.dreb.sum = express.func("^HT.OS[0-9].dreb*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.OS.sum = mean(VT.OS.dreb.sum),
+                                 mean.HT.OS.sum = mean(HT.OS.dreb.sum))
+
+#HT.S.dreb by each team
+HT.OS.dreb <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.OS.dreb.sum = mean(HT.OS.dreb.sum),
+                             sd.HT.OS.dreb.sum = sd(HT.OS.dreb.sum))
+
+#VT.S.dreb by each team
+VT.OS.dreb <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.OS.dreb.sum = mean(VT.OS.dreb.sum),
+                             sd.VT.OS.dreb.sum = sd(VT.OS.dreb.sum))
+
+#Zscore for HT.S.dreb
+mix <- mix %>% left_join(HT.OS.dreb, by="HT") %>% 
+  mutate(HT.Team.OTS.dreb.zscore = (HT.OS.dreb.sum-mean.HT.OS.dreb.sum)/sd.HT.OS.dreb.sum) %>%
+  select(subset = -c(mean.HT.OS.dreb.sum, sd.HT.OS.dreb.sum))
+
+#Zscore for VT.S.dreb
+mix <- mix %>% left_join(VT.OS.dreb, by="VT") %>% 
+  mutate(VT.Team.OTS.dreb.zscore = (VT.OS.dreb.sum-mean.VT.OS.dreb.sum)/sd.VT.OS.dreb.sum) %>%
+  select(subset = -c(mean.VT.OS.dreb.sum, sd.VT.OS.dreb.sum))
+
+rm(HT.OS.dreb,VT.OS.dreb)
+
+######################################
+#Sum of OS.to
+mix <- mix %>% 
+  mutate(VT.OS.to.sum = express.func("^VT.OS[0-9].to*",sum),
+         HT.OS.to.sum = express.func("^HT.OS[0-9].to*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.OS.sum = mean(VT.OS.to.sum),
+                                 mean.HT.OS.sum = mean(HT.OS.to.sum))
+
+#HT.S.to by each team
+HT.OS.to <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.OS.to.sum = mean(HT.OS.to.sum),
+                             sd.HT.OS.to.sum = sd(HT.OS.to.sum))
+
+#VT.S.to by each team
+VT.OS.to <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.OS.to.sum = mean(VT.OS.to.sum),
+                             sd.VT.OS.to.sum = sd(VT.OS.to.sum))
+
+#Zscore for HT.S.to
+mix <- mix %>% left_join(HT.OS.to, by="HT") %>% 
+  mutate(HT.Team.OTS.to.zscore = (HT.OS.to.sum-mean.HT.OS.to.sum)/sd.HT.OS.to.sum) %>%
+  select(subset = -c(mean.HT.OS.to.sum, sd.HT.OS.to.sum))
+
+#Zscore for VT.S.to
+mix <- mix %>% left_join(VT.OS.to, by="VT") %>% 
+  mutate(VT.Team.OTS.to.zscore = (VT.OS.to.sum-mean.VT.OS.to.sum)/sd.VT.OS.to.sum) %>%
+  select(subset = -c(mean.VT.OS.to.sum, sd.VT.OS.to.sum))
+
+rm(HT.OS.to,VT.OS.to)
+
+######################################
+#Sum of OS.fgm
+mix <- mix %>% 
+  mutate(VT.OS.fgm.sum = express.func("^VT.OS[0-9].fgm*",sum),
+         HT.OS.fgm.sum = express.func("^HT.OS[0-9].fgm*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.OS.sum = mean(VT.OS.fgm.sum),
+                                 mean.HT.OS.sum = mean(HT.OS.fgm.sum))
+
+#HT.S.fgm by each team
+HT.OS.fgm <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.OS.fgm.sum = mean(HT.OS.fgm.sum),
+                             sd.HT.OS.fgm.sum = sd(HT.OS.fgm.sum))
+
+#VT.S.fgm by each team
+VT.OS.fgm <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.OS.fgm.sum = mean(VT.OS.fgm.sum),
+                             sd.VT.OS.fgm.sum = sd(VT.OS.fgm.sum))
+
+#Zscore for HT.S.fgm
+mix <- mix %>% left_join(HT.OS.fgm, by="HT") %>% 
+  mutate(HT.Team.OTS.fgm.zscore = (HT.OS.fgm.sum-mean.HT.OS.fgm.sum)/sd.HT.OS.fgm.sum) %>%
+  select(subset = -c(mean.HT.OS.fgm.sum, sd.HT.OS.fgm.sum))
+
+#Zscore for VT.S.fgm
+mix <- mix %>% left_join(VT.OS.fgm, by="VT") %>% 
+  mutate(VT.Team.OTS.fgm.zscore = (VT.OS.fgm.sum-mean.VT.OS.fgm.sum)/sd.VT.OS.fgm.sum) %>%
+  select(subset = -c(mean.VT.OS.fgm.sum, sd.VT.OS.fgm.sum))
+
+rm(HT.OS.fgm,VT.OS.fgm)
+
+######################################
+#Sum of OS.oreb
+mix <- mix %>% 
+  mutate(VT.OS.oreb.sum = express.func("^VT.OS[0-9].oreb*",sum),
+         HT.OS.oreb.sum = express.func("^HT.OS[0-9].oreb*",sum))
+
+mix %>% filter(!is.na(HTWins)) %>% 
+  group_by(HTWins) %>% summarise(mean.VT.OS.sum = mean(VT.OS.oreb.sum),
+                                 mean.HT.OS.sum = mean(HT.OS.oreb.sum))
+
+#HT.S.oreb by each team
+HT.OS.oreb <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(HT) %>% summarise(mean.HT.OS.oreb.sum = mean(HT.OS.oreb.sum),
+                             sd.HT.OS.oreb.sum = sd(HT.OS.oreb.sum))
+
+#VT.S.oreb by each team
+VT.OS.oreb <- mix %>% filter(!is.na(HTWins)) %>%
+  group_by(VT) %>% summarise(mean.VT.OS.oreb.sum = mean(VT.OS.oreb.sum),
+                             sd.VT.OS.oreb.sum = sd(VT.OS.oreb.sum))
+
+#Zscore for HT.S.oreb
+mix <- mix %>% left_join(HT.OS.oreb, by="HT") %>% 
+  mutate(HT.Team.OTS.oreb.zscore = (HT.OS.oreb.sum-mean.HT.OS.oreb.sum)/sd.HT.OS.oreb.sum) %>%
+  select(subset = -c(mean.HT.OS.oreb.sum, sd.HT.OS.oreb.sum))
+
+#Zscore for VT.S.oreb
+mix <- mix %>% left_join(VT.OS.oreb, by="VT") %>% 
+  mutate(VT.Team.OTS.oreb.zscore = (VT.OS.oreb.sum-mean.VT.OS.oreb.sum)/sd.VT.OS.oreb.sum) %>%
+  select(subset = -c(mean.VT.OS.oreb.sum, sd.VT.OS.oreb.sum))
+
+rm(HT.OS.oreb,VT.OS.oreb)
+```
+
+######################################
+#One Hot Encoding
+#This will convert categorical variables into the combination matrix of 0,1.
+#Adds more than 50 columns but I think it's worth addining them.
+######################################
+
+------------
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(caret)
+#Separate date into year, month, and day
+#mix = mix %>% 
+#  mutate(date = ymd(date)) %>% 
+#  mutate_at(vars(date), funs(year, month, day))
+
+#Change date variable to weekdays
+mix = mix %>% mutate(wd = as.factor(weekdays(as.Date(date)))) %>% select(subset = -c(date))
+
+mix.new <- mix %>% subset(select = c(HTWins, HTleague, VTleague, HT, VT, wd))
+
+#one hot encoding
+dummies <- dummyVars(~VT + HT + VTleague + HTleague + wd, data=mix.new)
+dummies.pred <- predict(dummies, mix.new)
+mix.onehot <- cbind(mix.new, dummies.pred)
+mix.onehot <- mix.onehot %>% select(subset=-c(VT,HT,VTleague,HTleague,wd))
+
+mix.onehot %>% select_if(is.factor) %>% colnames
+
+mix %>% select_if(is.factor) %>% colnames
+mix <- mix %>% select(subset=-c(VT,HT,VTleague,HTleague,wd))
+mix.onehot <- mix.onehot %>% select(subset=-c(HTWins))
+
+#Merge one hot encoding into the mix dataset
+total.mix = cbind(mix, mix.onehot)
+
+rm(mix.new, mix.onehot, dV, dv.pred, dummies, dummies.pred)
+```
+
+######################################
+#Plots to find or check the pattern of variables
+######################################
+
+```{r}
+##See the overall pattern of data
+library(ggplot2)
+#Home team field goal made / attempted
+#Kind of sig
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.TS.fgm/HT.TS.fga)) + geom_boxplot()
+
+#Home team, opposing team field goal made / attempted
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.OTS.fgm/HT.OTS.fga)) + geom_boxplot()
+
+#Home team three point goal made / attempted
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.TS.tpm/HT.TS.tpa)) + geom_boxplot()
+
+#Home team, opposing team three point goal made/attempted
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.OTS.tpm/HT.OTS.tpa)) + geom_boxplot()
+
+#Home team scored offensive rebound / defensive rebound
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.TS.oreb/HT.TS.dreb)) + geom_boxplot()
+
+#Home team free throws scored / allowed
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.TS.fta/HT.TA.fta)) + geom_boxplot()
+
+#Home team rest / total rest
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HTcumRest/(VTcumRest + HTcumRest))) + geom_boxplot()
+
+#Home team scored personal foul / total foul
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.TS.pf/(HT.TA.pf +HT.TS.pf))) + geom_boxplot()
+
+#Home team scored block / total block
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.TS.blk/(HT.TS.blk +HT.TA.blk))) + geom_boxplot()
+
+#Home team scored field goal made / total fgm
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.TS.fgm/(HT.TS.fgm +HT.OTS.fgm))) + geom_boxplot()
+
+#Home
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.Team.plmin.zscore)) + geom_boxplot()
+
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = VT.Team.plmin.zscore)) + geom_boxplot()
+
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.Team.pts.zscore)) + geom_boxplot()
+
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = VT.Team.pts.zscore)) + geom_boxplot()
+
+mix %>% filter(!is.na(HTWins)) %>% ggplot(aes(x = HTWins, y = HT.Team.min.zscore)) + geom_boxplot()
+```
+
+######################################
+#GLM to check the significance of the coefficients
+######################################
+```{r}
+total.mix.train = total.mix %>% filter(!is.na(HTWins))
+mix.glm = glm(HTWins ~ ., total.mix.train, family = "binomial")
+summary(mix.glm)
+```
+
+######################################
+#Tree base model for prediction
+######################################
+
+```{r}
+library(randomForest)
+train = total.mix %>% filter(!is.na(HTWins))
+test = total.mix %>% filter(is.na(HTWins))
+model1 <- randomForest(HTWins ~ ., data = train, ntree = 500, mtry = 6, importance = TRUE)
+model1
+predTrain <- predict(model1, train, type = "class")
+table(predTrain, train$HTWins)
+
+######################################
+#See the importance of each variable
+varImpPlot(model1)
+
+######################################
+#Output predict csv file for Kaggle upload
+predValid <- predict(model1, test, type = "class")
+samplecsv = data.frame(id = test.full$id, HTWins = predValid)
+write.csv(samplecsv, file = "submit.csv", row.names = F)
+```
+
+######################################
+#Ensemble Method
+######################################
+
+```{r}
+library(mlbench)
+library(caretEnsemble)
+library("SuperLearner")
+library(ranger)
+ 
+#Change response variable type
+#Load variable
+y <- as.numeric(train$HTWins)-1
+ytest <- as.numeric(test$HTWins)-1
+x <- data.frame(train[,-1])
+xtest <- data.frame(test[,-1])
+
+listWrappers()
+
+set.seed(150)
+single.model <- SuperLearner(y,
+                             x,
+                             family=binomial(),
+                             SL.library=list("SL.ranger"))
+
+single.model
+
+set.seed(150)
+
+# Fit the ensemble model
+model <- SuperLearner(y,
+                      x,
+                      family=binomial(),
+                      SL.library=list("SL.ranger",
+                                     "SL.ksvm",
+                                     "SL.ipredbagg",
+                                     "SL.bayesglm"))
+
+# Return the model
+model
+
+# Set the seed
+set.seed(150)
+
+# Get V-fold cross-validated risk estimate
+cv.model <- CV.SuperLearner(y,
+                            x,
+                            V=5,
+                            SL.library=list("SL.ranger",
+                                            "SL.ksvm",
+                                            "SL.ipredbagg",
+                                            "SL.bayesglm"))
+
+# Print out the summary statistics
+summary(cv.model)
+
+plot(cv.model)
+
+predictions <- predict.SuperLearner(model, newdata=xtest)
+head(predictions$pred)
+head(predictions$library.predict)
+conv.preds <- as.factor(ifelse(predictions$pred>=0.5,"Yes", "No"))
+
+#Output predict csv file for Kaggle upload
+samplecsv = data.frame(id = test.full$id, HTWins = conv.preds)
+write.csv(samplecsv, file = "sample.csv", row.names = F)
+```
